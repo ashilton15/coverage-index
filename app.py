@@ -14,9 +14,30 @@ from sheets import (
     load_outlets_from_excel,
     connect_to_sheets,
     get_or_create_spreadsheet,
+    load_clients_from_sheet,
+    save_client_to_sheet,
+    delete_client_from_sheet,
+    load_outlets_from_sheet,
+    save_outlets_to_sheet,
 )
 from pdf_report import generate_coverage_report
 import os
+
+
+@st.cache_resource
+def get_sheets_spreadsheet():
+    """Connect to Google Sheets and return the CoverageIndex spreadsheet.
+
+    Cached so the connection is reused across reruns.
+    Returns None if credentials are not configured.
+    """
+    try:
+        creds = dict(st.secrets["gcp_service_account"])
+        gc = connect_to_sheets(creds)
+        spreadsheet = get_or_create_spreadsheet(gc, "CoverageIndex")
+        return spreadsheet
+    except Exception:
+        return None
 
 # Page config
 st.set_page_config(
@@ -115,17 +136,53 @@ def check_auth():
 
 
 def load_data():
-    """Load outlets and clients data."""
-    if st.session_state.outlets_df is None:
-        try:
-            st.session_state.outlets_df = load_outlets_from_excel("Media Outlets.xlsx")
-        except Exception as e:
-            st.error(f"Could not load outlets: {e}")
-            st.session_state.outlets_df = pd.DataFrame()
+    """Load outlets and clients data from Google Sheets (with local fallback for outlets)."""
+    spreadsheet = get_sheets_spreadsheet()
 
-    # Load default Coinbase client if no clients exist
+    # Load outlets
+    if st.session_state.outlets_df is None:
+        loaded = False
+        # Try Google Sheets first
+        if spreadsheet is not None:
+            try:
+                df = load_outlets_from_sheet(spreadsheet)
+                if not df.empty:
+                    st.session_state.outlets_df = df
+                    loaded = True
+            except Exception:
+                pass
+        # Fall back to local Excel file
+        if not loaded:
+            try:
+                st.session_state.outlets_df = load_outlets_from_excel("Media Outlets.xlsx")
+                # Sync local outlets to Sheets on first load
+                if spreadsheet is not None and st.session_state.outlets_df is not None and not st.session_state.outlets_df.empty:
+                    try:
+                        save_outlets_to_sheet(spreadsheet, st.session_state.outlets_df)
+                    except Exception:
+                        pass
+            except Exception as e:
+                st.error(f"Could not load outlets: {e}")
+                st.session_state.outlets_df = pd.DataFrame()
+
+    # Load clients from Google Sheets
     if not st.session_state.clients:
-        st.session_state.clients = {"Coinbase": get_default_coinbase_client()}
+        if spreadsheet is not None:
+            try:
+                clients = load_clients_from_sheet(spreadsheet)
+                if clients:
+                    st.session_state.clients = clients
+            except Exception:
+                pass
+        # Fall back to default if nothing loaded
+        if not st.session_state.clients:
+            st.session_state.clients = {"Coinbase": get_default_coinbase_client()}
+            # Save default client to Sheets
+            if spreadsheet is not None:
+                try:
+                    save_client_to_sheet(spreadsheet, "Coinbase", st.session_state.clients["Coinbase"])
+                except Exception:
+                    pass
 
 
 def get_default_coinbase_client():
@@ -245,8 +302,23 @@ def render_client_profiles():
 
     client = st.session_state.clients[selected_client]
 
-    st.markdown(f"### {client['name']}")
-    st.markdown(f"**Industry:** {client.get('industry', 'Not set')}")
+    col_title, col_delete = st.columns([4, 1])
+    with col_title:
+        st.markdown(f"### {client['name']}")
+        st.markdown(f"**Industry:** {client.get('industry', 'Not set')}")
+    with col_delete:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🗑️ Delete Client", key="delete_client_btn"):
+            # Remove from session state
+            del st.session_state.clients[selected_client]
+            # Remove from Google Sheets
+            spreadsheet = get_sheets_spreadsheet()
+            if spreadsheet is not None:
+                try:
+                    delete_client_from_sheet(spreadsheet, selected_client)
+                except Exception:
+                    pass
+            st.rerun()
 
     # Campaign management
     st.markdown("---")
@@ -285,11 +357,19 @@ def render_new_client_form():
         with col1:
             if st.form_submit_button("Create Client", type="primary"):
                 if name:
-                    st.session_state.clients[name] = {
+                    client_data = {
                         "name": name,
                         "industry": industry,
                         "campaigns": {}
                     }
+                    st.session_state.clients[name] = client_data
+                    # Persist to Google Sheets
+                    spreadsheet = get_sheets_spreadsheet()
+                    if spreadsheet is not None:
+                        try:
+                            save_client_to_sheet(spreadsheet, name, client_data)
+                        except Exception:
+                            pass
                     st.session_state.show_new_client_form = False
                     st.rerun()
         with col2:
@@ -355,6 +435,13 @@ def render_campaign_form(client_name: str, existing_campaign: dict = None):
                 }
 
                 st.session_state.clients[client_name]["campaigns"][name] = campaign
+                # Persist to Google Sheets
+                spreadsheet = get_sheets_spreadsheet()
+                if spreadsheet is not None:
+                    try:
+                        save_client_to_sheet(spreadsheet, client_name, st.session_state.clients[client_name])
+                    except Exception:
+                        pass
                 st.session_state.editing_campaign = None
                 st.rerun()
 
