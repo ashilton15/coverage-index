@@ -36,7 +36,12 @@ def get_sheets_spreadsheet():
         gc = connect_to_sheets(creds)
         spreadsheet = get_or_create_spreadsheet(gc, "Coverage Scorer Data")
         return spreadsheet
-    except Exception:
+    except KeyError:
+        # No gcp_service_account in secrets — Sheets disabled
+        return None
+    except Exception as e:
+        import logging
+        logging.error(f"Google Sheets connection failed: {e}")
         return None
 
 # Page config
@@ -172,8 +177,8 @@ def load_data():
                 clients = load_clients_from_sheet(spreadsheet)
                 if clients:
                     st.session_state.clients = clients
-            except Exception:
-                pass
+            except Exception as e:
+                st.toast(f"Failed to load clients from Sheets: {e}", icon="⚠️")
         # Fall back to default if nothing loaded
         if not st.session_state.clients:
             st.session_state.clients = {"Coinbase": get_default_coinbase_client()}
@@ -181,8 +186,8 @@ def load_data():
             if spreadsheet is not None:
                 try:
                     save_client_to_sheet(spreadsheet, "Coinbase", st.session_state.clients["Coinbase"])
-                except Exception:
-                    pass
+                except Exception as e:
+                    st.toast(f"Failed to save default client to Sheets: {e}", icon="⚠️")
 
 
 def get_default_coinbase_client():
@@ -316,8 +321,9 @@ def render_client_profiles():
             if spreadsheet is not None:
                 try:
                     delete_client_from_sheet(spreadsheet, selected_client)
-                except Exception:
-                    pass
+                    st.toast(f"Client '{selected_client}' deleted from Google Sheets")
+                except Exception as e:
+                    st.toast(f"Failed to delete from Sheets: {e}", icon="⚠️")
             st.rerun()
 
     # Campaign management
@@ -368,8 +374,11 @@ def render_new_client_form():
                     if spreadsheet is not None:
                         try:
                             save_client_to_sheet(spreadsheet, name, client_data)
-                        except Exception:
-                            pass
+                            st.toast(f"Client '{name}' saved to Google Sheets")
+                        except Exception as e:
+                            st.toast(f"Failed to save to Sheets: {e}", icon="⚠️")
+                    else:
+                        st.toast("Google Sheets not connected — saved locally only", icon="⚠️")
                     st.session_state.show_new_client_form = False
                     st.rerun()
         with col2:
@@ -440,8 +449,11 @@ def render_campaign_form(client_name: str, existing_campaign: dict = None):
                 if spreadsheet is not None:
                     try:
                         save_client_to_sheet(spreadsheet, client_name, st.session_state.clients[client_name])
-                    except Exception:
-                        pass
+                        st.toast(f"Campaign '{name}' saved to Google Sheets")
+                    except Exception as e:
+                        st.toast(f"Failed to save campaign to Sheets: {e}", icon="⚠️")
+                else:
+                    st.toast("Google Sheets not connected — saved locally only", icon="⚠️")
                 st.session_state.editing_campaign = None
                 st.rerun()
 
