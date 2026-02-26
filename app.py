@@ -34,7 +34,7 @@ def get_sheets_spreadsheet():
     try:
         creds = dict(st.secrets["gcp_service_account"])
         gc = connect_to_sheets(creds)
-        spreadsheet = get_or_create_spreadsheet(gc, "CoverageIndex")
+        spreadsheet = get_or_create_spreadsheet(gc, "Coverage Scorer Data")
         return spreadsheet
     except Exception:
         return None
