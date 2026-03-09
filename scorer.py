@@ -446,13 +446,20 @@ def score_article(
 
 def lookup_outlet(domain: str, outlets_df) -> dict:
     """Look up outlet information by domain."""
+    import pandas as pd
+    
     if outlets_df is None or domain == "":
         return {"name": "Unknown", "tier": 3, "type": "Online", "found": False}
 
-    # Normalize column names to handle casing/spacing issues from Google Sheets
-    outlets_df.columns = outlets_df.columns.str.strip()
+    if not isinstance(outlets_df, pd.DataFrame) or outlets_df.empty:
+        return {"name": "Unknown", "tier": 3, "type": "Online", "found": False}
+
+    # Normalize column names - convert all to strings first, then strip
+    outlets_df = outlets_df.copy()
+    outlets_df.columns = [str(c).strip() for c in outlets_df.columns]
     col_map = {col.lower(): col for col in outlets_df.columns}
     domain_col = col_map.get("web domain")
+
     if domain_col is None:
         return {"name": "Unknown", "tier": 3, "type": "Online", "found": False}
 
@@ -469,7 +476,7 @@ def lookup_outlet(domain: str, outlets_df) -> dict:
             "found": True,
         }
 
-    # Try partial match (domain contains or is contained by)
+    # Try partial match
     for _, row in outlets_df.iterrows():
         outlet_domain = str(row[domain_col]).lower()
         if outlet_domain in domain or domain in outlet_domain:
