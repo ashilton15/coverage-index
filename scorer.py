@@ -449,8 +449,15 @@ def lookup_outlet(domain: str, outlets_df) -> dict:
     if outlets_df is None or domain == "":
         return {"name": "Unknown", "tier": 3, "type": "Online", "found": False}
 
+    # Normalize column names to handle casing/spacing issues from Google Sheets
+    outlets_df.columns = outlets_df.columns.str.strip()
+    col_map = {col.lower(): col for col in outlets_df.columns}
+    domain_col = col_map.get("web domain")
+    if domain_col is None:
+        return {"name": "Unknown", "tier": 3, "type": "Online", "found": False}
+
     # Try exact match first
-    match = outlets_df[outlets_df["Web Domain"].str.lower() == domain.lower()]
+    match = outlets_df[outlets_df[domain_col].str.lower() == domain.lower()]
 
     if len(match) > 0:
         row = match.iloc[0]
@@ -464,7 +471,7 @@ def lookup_outlet(domain: str, outlets_df) -> dict:
 
     # Try partial match (domain contains or is contained by)
     for _, row in outlets_df.iterrows():
-        outlet_domain = str(row["Web Domain"]).lower()
+        outlet_domain = str(row[domain_col]).lower()
         if outlet_domain in domain or domain in outlet_domain:
             return {
                 "name": row["Media Outlet"],
